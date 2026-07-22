@@ -220,6 +220,25 @@ static inline void lcdBacklightOn() {
 }
 
 /**
+ * @brief Set backlight brightness via PWM (0 = off, 100 = full)
+ */
+void DisplayManager::setBrightness(uint8_t percent) {
+    const uint16_t PWM_MIN = 778;
+    const uint16_t PWM_MAX = 1023;
+
+    if (percent > 100) percent = 100;
+    // analogWrite range 0-1023; backlight is active-low so invert
+    // int pwmVal = LCD_BACKLIGHT_ACTIVE_LOW ? ((100 - percent) * 1023 / 100) : (percent * 1023 / 100);
+    uint16_t pwmVal = PWM_MIN + (uint16_t)((percent * (PWM_MAX - PWM_MIN)) / 100);
+    if (LCD_BACKLIGHT_ACTIVE_LOW) {
+        pwmVal = 1023 - pwmVal;
+    }
+
+    pinMode((uint8_t)LCD_BACKLIGHT_GPIO, OUTPUT);
+    analogWrite((uint8_t)LCD_BACKLIGHT_GPIO, pwmVal);
+}
+
+/**
  * @brief Write a single command byte to the ST7789 via the data bus
  *
  * @return void

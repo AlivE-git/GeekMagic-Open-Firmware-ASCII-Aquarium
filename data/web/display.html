@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Display</title>
+    <link rel="stylesheet" href="./css/pico.min.css" />
+    <link rel="stylesheet" href="./css/style.css" />
+    <script src="./js/alpinejs.min.js" defer></script>
+    <script src="./js/utils.js"></script>
+    <script src="./js/themeSwitcher.js"></script>
+    <script src="./js/displayHandler.js"></script>
+    <script src="./js/main.js"></script>
+</head>
+
+<body>
+    <main class="container">
+        <header id="header-placeholder"></header>
+
+        <a href="./index.html" class="wifi-back-link">← Back to Home</a>
+
+        <section x-data="displayHandler()" x-init="init()">
+
+            <h2>Brightness</h2>
+            <div style="display: flex; align-items: center; gap: 1em;">
+                <input type="range" min="0" max="100" style="flex: 1" x-bind:value="brightness"
+                    x-on:input="setBrightness($event.target.value)" />
+                <span x-text="brightness + '%'" style="min-width: 3em; text-align: right;"></span>
+            </div>
+
+        </section>
+
+        <footer id="footer-placeholder"></footer>
+    </main>
+</body>
+
+</html>

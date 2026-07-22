@@ -50,6 +50,8 @@ static void otaHandleWrite(HTTPUpload& upload);
 static void otaHandleEnd(HTTPUpload& upload, int mode);
 static void otaHandleAborted(HTTPUpload& upload);
 void handleDeleteGif(Webserver* webserver);
+void handleBrightnessGet(Webserver* webserver);
+void handleBrightnessSet(Webserver* webserver);
 
 static constexpr int WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr size_t NTP_CONFIG_DOC_SIZE = 512;
@@ -172,6 +174,9 @@ void registerApiEndpoints(Webserver* webserver) {
     // @openapi {post} /logs/clear version=v1 group=System summary="Clear log buffer" requiresAuth=true
     // responses=200:application/json,401:application/json
     webserver->raw().on("/api/v1/logs/clear", HTTP_POST, [webserver]() { handleLogsClear(webserver); });
+
+    webserver->raw().on("/api/v1/display/brightness", HTTP_GET, [webserver]() { handleBrightnessGet(webserver); });
+    webserver->raw().on("/api/v1/display/brightness", HTTP_POST, [webserver]() { handleBrightnessSet(webserver); });
 
     webserver->raw().onNotFound([webserver]() {
         if (webserver->raw().method() == HTTP_OPTIONS) {
@@ -1545,6 +1550,82 @@ void handleLogsClear(Webserver* webserver) {
     String json;
     serializeJson(doc, json);
 
+    setCorsHeaders(webserver);
+    webserver->raw().send(HTTP_CODE_OK, "application/json", json);
+}
+
+void handleBrightnessGet(Webserver* webserver) {
+    if (!requireBearerToken(webserver)) return;
+
+    JsonDocument doc;
+    doc["brightness"] = configManager.getLcdBrightness();
+    String json;
+    serializeJson(doc, json);
+    setCorsHeaders(webserver);
+    webserver->raw().send(HTTP_CODE_OK, "application/json", json);
+}
+
+/**
+ * @brief Set LCD brightness (0-100), persists to config
+ * Body: {"brightness": 80}
+ */
+void handleBrightnessSet(Webserver* webserver) {
+    if (!requireBearerToken(webserver)) return;
+
+    if (!webserver->raw().hasArg("plain") || webserver->raw().arg("plain").length() == 0) {
+        JsonDocument doc;
+        doc["status"] = "error";
+        doc["message"] = "Missing JSON body";
+        String json;
+        serializeJson(doc, json);
+        setCorsHeaders(webserver);
+        webserver->raw().send(HTTP_CODE_BAD_REQUEST, "application/json", json);
+        return;
+    }
+
+    JsonDocument ddoc;
+    if (deserializeJson(ddoc, webserver->raw().arg("plain"))) {
+        JsonDocument doc;
+        doc["status"] = "error";
+        doc["message"] = "Invalid JSON";
+        String json;
+        serializeJson(doc, json);
+        setCorsHeaders(webserver);
+        webserver->raw().send(HTTP_CODE_BAD_REQUEST, "application/json", json);
+        return;
+    }
+
+    int brightness = ddoc["brightness"] | -1;
+    if (brightness < 0 || brightness > 100) {
+        JsonDocument doc;
+        doc["status"] = "error";
+        doc["message"] = "brightness must be 0-100";
+        String json;
+        serializeJson(doc, json);
+        setCorsHeaders(webserver);
+        webserver->raw().send(HTTP_CODE_BAD_REQUEST, "application/json", json);
+        return;
+    }
+
+    configManager.setLcdBrightness(static_cast<uint8_t>(brightness));
+    DisplayManager::setBrightness(static_cast<uint8_t>(brightness));
+
+    if (!configManager.save()) {
+        JsonDocument doc;
+        doc["status"] = "error";
+        doc["message"] = "Failed to save config";
+        String json;
+        serializeJson(doc, json);
+        setCorsHeaders(webserver);
+        webserver->raw().send(HTTP_CODE_INTERNAL_ERROR, "application/json", json);
+        return;
+    }
+
+    JsonDocument doc;
+    doc["status"] = "ok";
+    doc["brightness"] = brightness;
+    String json;
+    serializeJson(doc, json);
     setCorsHeaders(webserver);
     webserver->raw().send(HTTP_CODE_OK, "application/json", json);
 }

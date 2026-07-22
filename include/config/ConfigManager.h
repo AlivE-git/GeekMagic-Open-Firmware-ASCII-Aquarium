@@ -67,6 +67,11 @@ class ConfigManager {
     void setNtpServer(const char* s) {
         if (s) ntp_server = s;
     }
+
+    uint8_t getLcdBrightness() const { return lcd_brightness; }
+    void setLcdBrightness(uint8_t b) { lcd_brightness = b; }
+
+    uint8_t lcd_brightness = 100;
 };
 
 #endif  // CONFIG_MANAGER_H

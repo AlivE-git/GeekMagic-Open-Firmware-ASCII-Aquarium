@@ -137,7 +137,7 @@ void setup() {
     step += 2;
 
     DisplayManager::begin();
-
+    DisplayManager::setBrightness(configManager.getLcdBrightness());
     DisplayManager::drawLoadingBar((float)step / TOTAL_STEPS, LOADING_BAR_Y);
 
     step++;
