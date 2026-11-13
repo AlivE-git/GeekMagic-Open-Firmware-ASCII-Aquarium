@@ -33,6 +33,7 @@
 #include "ntp/NTPClient.h"
 #include "boot/RescueMode.h"
 #include "dashboard/DashboardManager.h"
+#include "aquarium/AquariumManager.h"
 #include <array>
 
 #ifndef METRICS_URL
@@ -181,6 +182,10 @@ void setup() {
 
     DisplayManager::drawStartup(wifiManager->getIP().toString());
 
+    if (METRICS_ENDPOINT[0] == '\0') {
+        AquariumManager::begin();
+    }
+
     if (METRICS_ENDPOINT[0] != '\0' && WiFiManager::isConnected() && !wifiManager->isApMode()) {
         DashboardManager::begin(METRICS_ENDPOINT);
     }
@@ -211,6 +216,8 @@ void loop() {
     }
 
     DisplayManager::update();
+
+    AquariumManager::update();
 
     if (METRICS_ENDPOINT[0] != '\0' && wifiManager != nullptr && WiFiManager::isConnected() &&
         !wifiManager->isApMode()) {

@@ -229,3 +229,17 @@ details.dropdown ul li a:hover {
   width: 18px;
   height: 18px;
 }
+
+/* Aquarium settings: a bordered card per group, so related sliders read as one block. */
+.aquarium-group {
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 0.5rem;
+  padding: 0.25rem 1rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.aquarium-group legend {
+  font-weight: 600;
+  padding: 0 0.4rem;
+  opacity: 0.85;
+}

@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aquarium simulator</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --line: #333;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #111;
+        color: #e6e6e6;
+        font: 14px/1.4 system-ui, sans-serif;
+        display: flex;
+        gap: 20px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 8px;
+      }
+      .stage {
+        position: sticky;
+        top: 16px;
+        flex: 0 1 480px;
+        max-width: 100%;
+      }
+      canvas {
+        display: block;
+        width: min(480px, 100%);
+        height: auto;
+        aspect-ratio: 1;
+        image-rendering: pixelated;
+        background: #000;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+      /* On a narrow window the panel sits under the canvas, so the canvas must not stick. */
+      @media (max-width: 900px) {
+        .stage {
+          position: static;
+        }
+      }
+      .caption {
+        color: #888;
+        font-size: 12px;
+        margin-top: 8px;
+        max-width: 480px;
+      }
+      .panel {
+        flex: 1 1 320px;
+        max-width: 520px;
+        min-width: 300px;
+      }
+      fieldset {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        margin: 0 0 12px;
+        padding: 4px 12px 10px;
+      }
+      h2.section-title {
+        font-size: 15px;
+        margin: 18px 0 8px;
+        color: #ccc;
+      }
+      fieldset.plant {
+        margin-bottom: 8px;
+        padding: 2px 12px 8px;
+      }
+      fieldset.plant .row {
+        margin-top: 6px;
+      }
+      legend {
+        font-weight: 600;
+        padding: 0 4px;
+        color: #bbb;
+      }
+      label {
+        display: block;
+        margin: 8px 0 2px;
+        font-size: 13px;
+      }
+      label.switch {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      input[type="range"] {
+        width: 100%;
+        accent-color: #0bd;
+      }
+      input[type="number"] {
+        width: 70px;
+        background: #1c1c1c;
+        color: inherit;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 2px 6px;
+      }
+      input[type="color"] {
+        width: 60px;
+        height: 28px;
+        background: none;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 0;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+      button {
+        background: #1f6feb;
+        color: #fff;
+        border: 0;
+        border-radius: 4px;
+        padding: 6px 14px;
+        cursor: pointer;
+      }
+      em {
+        color: #9ad;
+        font-style: normal;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="stage">
+      <h1>Aquarium simulator</h1>
+      <canvas id="screen" width="240" height="240"></canvas>
+      <p class="caption">
+        240×240, scaled ×2 here. Same glyphs, same maths as the firmware: bracketed seaweed with sway,
+        fish with body wave, bob, impulses and turns, and the bite rules on top.
+      </p>
+    </div>
+
+    <div class="panel" id="panel"></div>
+
+    <script>
+      // ---------- scene constants (mirror of AquariumManager.cpp) ----------
+      const SCREEN_W = 240;
+      const SCREEN_H = 240;
+      const WATER_TOP = 2;
+      const BASE_MARGIN = 4;
+      const FRAME_MS = 33;
+      const FRAME_SECONDS = FRAME_MS / 1000;
+
+      const GLYPH_W = 5;
+      const GLYPH_H = 7;
+      const CELL_W = 4;
+
+      const SWAY_STEPS = 64;
+      const SINE_FULL = 127;
+      const SIN_LUT = [
+        0, 12, 25, 37, 49, 60, 71, 81, 90, 98, 106, 112, 117, 122, 125, 126, 127, 126, 125, 122, 117,
+        112, 106, 98, 90, 81, 71, 60, 49, 37, 25, 12, 0, -12, -25, -37, -49, -60, -71, -81, -90, -98,
+        -106, -112, -117, -122, -125, -126, -127, -126, -125, -122, -117, -112, -106, -98, -90, -81,
+        -71, -60, -49, -37, -25, -12,
+      ];
+
+      const HEAD_RIGHT = 0;
+      const HEAD_LEFT = 1;
+      const OPEN = 2;
+      const CLOSE = 3;
+      const EYE = 4;
+      const CURLY_OPEN = 5;
+      const CURLY_CLOSE = 6;
+      const GLYPHS = [
+        [0x10, 0x08, 0x04, 0x02, 0x04, 0x08, 0x10],
+        [0x01, 0x02, 0x04, 0x08, 0x04, 0x02, 0x01],
+        [0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02],
+        [0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08],
+        [0x04, 0x0a, 0x04, 0x00, 0x00, 0x00, 0x00],
+        [0x02, 0x04, 0x04, 0x08, 0x04, 0x04, 0x02],
+        [0x08, 0x04, 0x04, 0x02, 0x04, 0x04, 0x08],
+      ];
+
+      const BODY_FRY = [HEAD_RIGHT, HEAD_LEFT, EYE, HEAD_RIGHT];
+      const BODY_SHORT = [HEAD_RIGHT, HEAD_LEFT, CLOSE, CLOSE, EYE, HEAD_RIGHT];
+      const BODY_LONG = [HEAD_RIGHT, HEAD_LEFT, CLOSE, CLOSE, CLOSE, EYE, HEAD_RIGHT];
+      const BODY_BENT = [HEAD_RIGHT, HEAD_LEFT, OPEN, OPEN, EYE, HEAD_RIGHT];
+      const BODY_PLAIN = [HEAD_RIGHT, CLOSE, CLOSE, CLOSE, EYE, HEAD_RIGHT];
+      const BODY_SHORT_CURLY = [HEAD_RIGHT, HEAD_LEFT, CURLY_CLOSE, CURLY_CLOSE, EYE, HEAD_RIGHT];
+      const BODY_LONG_CURLY = [
+        HEAD_RIGHT,
+        HEAD_LEFT,
+        CURLY_CLOSE,
+        CURLY_CLOSE,
+        CURLY_CLOSE,
+        EYE,
+        HEAD_RIGHT,
+      ];
+      const BODY_BENT_CURLY = [HEAD_RIGHT, HEAD_LEFT, CURLY_OPEN, CURLY_OPEN, EYE, HEAD_RIGHT];
+      const BODY_PLAIN_CURLY = [HEAD_RIGHT, CURLY_CLOSE, CURLY_CLOSE, CURLY_CLOSE, EYE, HEAD_RIGHT];
+      const BODIES = [
+        BODY_FRY,
+        BODY_SHORT,
+        BODY_LONG,
+        BODY_BENT,
+        BODY_PLAIN,
+        BODY_SHORT_CURLY,
+        BODY_LONG_CURLY,
+        BODY_BENT_CURLY,
+        BODY_PLAIN_CURLY,
+      ];
+
+      const FISH_WAVE_AMPLITUDE = 1;
+      const FISH_WAVE_SLOT_STEP = 8;
+      const FISH_WAVE_TRAVEL = 40;
+      const FISH_BOB_TRAVEL = 73;
+      const FISH_EAT_REACH = 6;
+      const FISH_EAT_MS = 700;
+      const FISH_DIVE_FACTOR = 1.5;
+      const FISH_EAT_MAX_MS = 4000;
+      const FISH_ROAM_FACTOR = 0.7;
+      const FISH_ROAM_MIN_MS = 1800;
+      const FISH_ROAM_MAX_MS = 5500;
+
+      const BUBBLE_MAX = 16;
+      const BUBBLE_SIZE = 3;
+      const BUBBLE_SWAY = 2;
+      const BUBBLE_ROWS = [0x02, 0x05, 0x02];
+      const FISH_EAT_COOLDOWN_MS = 9000;
+      const FISH_TURN_MS = 260;
+      const FISH_TURN_SQUASH = 200;
+      const FISH_IMPULSE_MIN_MS = 2500;
+      const FISH_IMPULSE_MAX_MS = 8000;
+      const FISH_MARGIN = 8;
+
+      const FISH_COLORS = [0xfd20, 0x07ff, 0xffe0, 0xf81f, 0xffff, 0xfa20];
+
+      // ---------- helpers ----------
+      function rand(min, max) {
+        return min + Math.floor(Math.random() * (max - min + 1));
+      }
+      function rnd(value) {
+        return Math.floor(value + (value >= 0 ? 0.5 : -0.5));
+      }
+      function rgb565(c) {
+        const r = Math.round((((c >> 11) & 0x1f) * 255) / 31);
+        const g = Math.round((((c >> 5) & 0x3f) * 255) / 63);
+        const b = Math.round(((c & 0x1f) * 255) / 31);
+        return "rgb(" + r + "," + g + "," + b + ")";
+      }
+
+      // ---------- configuration ----------
+      const cfg = {
+        arc_height: 27,
+        arc_offset: 9,
+        arc_bulge: 5,
+        arc_stroke: 1,
+        stagger: 3,
+        sway_max: 4,
+        sway_phase_step: 0,
+        sway_step_ms: 60,
+        color: 0x07e0,
+        fish_count: 3,
+        fish_scale_min: 2,
+        fish_scale_max: 3,
+        fish_speed_min: 15,
+        fish_speed_max: 45,
+        fish_bob_min: 1,
+        fish_bob_max: 3,
+        fish_turn_anim: true,
+        fish_swim: "free",
+        bubbles: true,
+        bubble_chance: 20,
+        bubble_rise: 10,
+        bubble_every_ms: 1200,
+        weed_grow_s: 20,
+        weed_eat: true,
+        fish_eat_chance: 30,
+        weeds: [
+          { x: 72, brackets: 2 },
+          { x: 168, brackets: 3 },
+        ],
+      };
+
+      // ---------- runtime state ----------
+      const canvas = document.getElementById("screen");
+      const ctx = canvas.getContext("2d");
+
+      let now = 0;
+      let arcOffsets = [];
+      let canvasW = 0;
+      let canvasH = 0;
+      let band = 0;
+      let fish = [];
+      let eaten = [];
+      let regrowAt = [];
+      let lastSwim = cfg.fish_swim;
+      let respawnAll = false;
+      let bubbles = [];
+      for (let i = 0; i < BUBBLE_MAX; i++) {
+        bubbles.push({ active: false, y: 0, axisX: 0, phase: 0 });
+      }
+
+      function weedHeight(brackets) {
+        return (brackets - 1) * cfg.arc_offset + cfg.arc_height;
+      }
+
+      function rebuildArcShape() {
+        const span = cfg.arc_height - 1;
+        const denom = Math.max(1, span * span);
+        arcOffsets = [];
+        for (let row = 0; row < cfg.arc_height; row++) {
+          const num = 4 * cfg.arc_bulge * row * (span - row);
+          const lean = Math.round(num / denom);
+          arcOffsets.push(cfg.arc_bulge - 2 * lean);
+        }
+      }
+
+      function computeCanvas() {
+        canvasW = 2 * (cfg.arc_bulge + cfg.sway_max + cfg.stagger) + cfg.arc_stroke + 2;
+        canvasH = cfg.arc_height;
+        for (const weed of cfg.weeds) {
+          canvasH = Math.max(canvasH, weedHeight(weed.brackets));
+        }
+      }
+
+      function makeFish() {
+        return {
+          x: 0,
+          y: 0,
+          vx: 0,
+          baseY: 0,
+          color: 0,
+          body: BODY_SHORT,
+          glyphCount: BODY_SHORT.length,
+          scale: 2,
+          bobAmp: 1,
+          bobPhase: 0,
+          waveOffset: 0,
+          nextEventMs: 0,
+          turnEndMs: 0,
+          turnPending: 0,
+          eatStartMs: 0,
+          eatEndMs: 0,
+          nextEatMs: 0,
+          eatWeed: -1,
+          eatTargetY: 0,
+          wanderY: 0,
+          nextWanderMs: 0,
+          nextBubbleMs: 0,
+        };
+      }
+
+      function spriteWidth(f) {
+        return ((f.glyphCount - 1) * CELL_W + GLYPH_W) * f.scale;
+      }
+
+      function spawnFish(f, index) {
+        const scaleLow = Math.min(cfg.fish_scale_min, cfg.fish_scale_max);
+        const scaleHigh = Math.max(cfg.fish_scale_min, cfg.fish_scale_max);
+        const speedLow = Math.min(cfg.fish_speed_min, cfg.fish_speed_max);
+        const speedHigh = Math.max(cfg.fish_speed_min, cfg.fish_speed_max);
+        const bobLow = Math.min(cfg.fish_bob_min, cfg.fish_bob_max);
+        const bobHigh = Math.max(cfg.fish_bob_min, cfg.fish_bob_max);
+
+        f.scale = rand(scaleLow, scaleHigh);
+        f.body = BODIES[rand(0, BODIES.length - 1)];
+        f.glyphCount = f.body.length;
+        f.color = FISH_COLORS[rand(0, FISH_COLORS.length - 1)];
+
+        const width = spriteWidth(f);
+        const height = GLYPH_H * f.scale;
+
+        const speed = rand(speedLow, speedHigh);
+        const perFrame = speed * FRAME_SECONDS;
+        const swimsRight = rand(0, 1) === 0;
+        f.vx = swimsRight ? perFrame : -perFrame;
+        f.x = swimsRight ? -(width + FISH_MARGIN + rand(0, 24)) : SCREEN_W + FISH_MARGIN + rand(0, 24);
+
+        const wavePad = FISH_WAVE_AMPLITUDE * 2 * f.scale;
+        const maxBase = WATER_TOP + band - height - wavePad - 1;
+        const room = maxBase > WATER_TOP ? maxBase - WATER_TOP : 0;
+
+        let baseY;
+        if (cfg.fish_swim === "lanes") {
+          const lane = cfg.fish_count > 0 ? Math.floor(band / cfg.fish_count) : band;
+          const laneTop = WATER_TOP + index * lane;
+          const slack = lane > height ? lane - height : 0;
+          baseY = laneTop + rand(0, slack);
+        } else {
+          baseY = WATER_TOP + rand(0, room);
+        }
+        if (baseY > maxBase) baseY = Math.max(maxBase, WATER_TOP);
+        if (baseY < WATER_TOP) baseY = WATER_TOP;
+
+        f.baseY = baseY;
+        f.eatTargetY = baseY;
+        f.wanderY = baseY;
+        f.nextWanderMs = now + rand(FISH_ROAM_MIN_MS, FISH_ROAM_MAX_MS);
+        f.nextBubbleMs = now + rand(0, cfg.bubble_every_ms);
+        f.y = baseY;
+        f.bobAmp = rand(bobLow, bobHigh);
+        f.bobPhase = rand(0, SWAY_STEPS - 1);
+        f.waveOffset = rand(0, SWAY_STEPS - 1);
+        f.nextEventMs = now + rand(FISH_IMPULSE_MIN_MS, FISH_IMPULSE_MAX_MS);
+        f.turnEndMs = 0;
+        f.turnPending = 0;
+        f.eatStartMs = 0;
+        f.eatEndMs = 0;
+        f.nextEatMs = 0;
+        f.eatWeed = -1;
+      }
+
+      // ---------- scene ----------
+      function layoutFish() {
+        rebuildArcShape();
+        computeCanvas();
+        band = SCREEN_H - BASE_MARGIN - canvasH - WATER_TOP;
+
+        const previous = fish.length;
+        fish = fish.slice(0, cfg.fish_count);
+        while (fish.length < cfg.fish_count) {
+          const f = makeFish();
+          fish.push(f);
+        }
+        if (band < GLYPH_H) return;
+
+        // Switching between lanes and free swimming re-deals the fish, so each mode starts from its own
+        // placement instead of keeping the depths of the other one.
+        if (respawnAll) {
+          respawnAll = false;
+          for (let i = 0; i < fish.length; i++) spawnFish(fish[i], i);
+          return;
+        }
+
+        for (let i = 0; i < fish.length; i++) {
+          if (i >= previous) {
+            spawnFish(fish[i], i);
+            continue;
+          }
+          const height = GLYPH_H * fish[i].scale;
+          const wavePad = FISH_WAVE_AMPLITUDE * 2 * fish[i].scale;
+          const maxBase = WATER_TOP + band - height - wavePad - 1;
+          if (fish[i].baseY > maxBase) fish[i].baseY = Math.max(maxBase, WATER_TOP);
+        }
+      }
+
+      function resetBites() {
+        eaten = cfg.weeds.map(() => 0);
+        regrowAt = cfg.weeds.map(() => 0);
+        for (const f of fish) {
+          f.eatWeed = -1;
+          f.eatStartMs = 0;
+          f.eatEndMs = 0;
+        }
+      }
+
+      function applyConfig() {
+        if (cfg.arc_offset >= cfg.arc_height) cfg.arc_offset = cfg.arc_height - 1;
+        if (cfg.arc_offset < 2) cfg.arc_offset = 2;
+        if (cfg.fish_scale_min > cfg.fish_scale_max) cfg.fish_scale_max = cfg.fish_scale_min;
+        if (cfg.fish_speed_min > cfg.fish_speed_max) cfg.fish_speed_max = cfg.fish_speed_min;
+        if (cfg.fish_bob_min > cfg.fish_bob_max) cfg.fish_bob_max = cfg.fish_bob_min;
+
+        if (cfg.weeds.length !== eaten.length) resetBites();
+        if (!cfg.weed_eat) resetBites();
+        if (cfg.fish_swim !== lastSwim) {
+          lastSwim = cfg.fish_swim;
+          respawnAll = true;
+        }
+        layoutFish();
+      }
+
+      function regrowWeeds() {
+        for (let i = 0; i < cfg.weeds.length; i++) {
+          if (eaten[i] === 0 || now - regrowAt[i] < 0) continue;
+          eaten[i] -= 1;
+          regrowAt[i] = now + cfg.weed_grow_s * 1000;
+        }
+      }
+
+      function drawArc(baseY, direction, shift) {
+        const centerX = Math.floor(canvasW / 2) + shift;
+        for (let row = 0; row < cfg.arc_height; row++) {
+          const y = SCREEN_H - BASE_MARGIN - canvasH + baseY + row;
+          if (y < 0 || y >= SCREEN_H) continue;
+          const topX = centerX + direction * arcOffsets[row];
+          ctx.fillStyle = rgb565(cfg.color);
+          ctx.fillRect(left + topX, y, cfg.arc_stroke, 1);
+        }
+      }
+
+      let left = 0;
+
+      function renderWeed(weed, levels, phase) {
+        left = weed.x - Math.floor(canvasW / 2);
+        const height = weedHeight(levels);
+        const plantTopY = canvasH - height;
+        const swaySpan = levels > 1 ? levels - 1 : 1;
+
+        for (let level = 0; level < levels; level++) {
+          const amplitude = Math.floor((cfg.sway_max * level) / swaySpan);
+          const wave = SIN_LUT[(phase + level * cfg.sway_phase_step) & (SWAY_STEPS - 1)];
+          const sway = Math.floor((amplitude * wave) / SINE_FULL);
+          const lateral = level === 0 ? 0 : level % 2 === 1 ? -cfg.stagger : cfg.stagger;
+          const direction = level % 2 === 0 ? 1 : -1;
+          const baseY = plantTopY + (levels - 1 - level) * cfg.arc_offset;
+          drawArc(baseY, direction, sway + lateral);
+        }
+      }
+
+      function applyImpulse(f) {
+        const low = Math.min(cfg.fish_speed_min, cfg.fish_speed_max);
+        const high = Math.max(cfg.fish_speed_min, cfg.fish_speed_max);
+
+        if (rand(0, 1) === 0) {
+          if (cfg.fish_turn_anim) {
+            f.turnEndMs = now + FISH_TURN_MS;
+            f.turnPending = 1;
+          } else {
+            f.vx = -f.vx;
+          }
+        }
+
+        const perFrame = rand(low, high) * FRAME_SECONDS;
+        f.vx = f.vx < 0 ? -perFrame : perFrame;
+        f.nextEventMs = now + rand(FISH_IMPULSE_MIN_MS, FISH_IMPULSE_MAX_MS);
+      }
+
+      function finishBite(f) {
+        const index = f.eatWeed;
+        if (cfg.weed_eat && index >= 0 && index < cfg.weeds.length) {
+          if (eaten[index] === 0) {
+            eaten[index] = 1;
+            regrowAt[index] = now + cfg.weed_grow_s * 1000;
+          }
+        }
+        f.eatEndMs = 0;
+        f.eatWeed = -1;
+      }
+
+      function tryStartEating(f) {
+        if (cfg.weeds.length === 0 || !cfg.weed_eat || cfg.weed_grow_s === 0) return;
+
+        let tallest = 0;
+        for (const weed of cfg.weeds) tallest = Math.max(tallest, weed.brackets);
+
+        if (cfg.fish_swim === "lanes") {
+          const laneCount = Math.max(1, cfg.fish_count);
+          const laneHeight = Math.floor(band / laneCount);
+          if (f.baseY + 0.5 < WATER_TOP + (laneCount - 1) * laneHeight) return;
+        } else if (f.baseY + 0.5 < WATER_TOP + band / 2) {
+          return;
+        }
+
+        const scale = f.scale;
+        const headOffset =
+          f.vx > 0
+            ? (f.glyphCount - 1) * CELL_W * scale + Math.floor((GLYPH_W * scale) / 2)
+            : Math.floor((GLYPH_W * scale) / 2);
+        const headX = f.x + headOffset;
+
+        for (let i = 0; i < cfg.weeds.length; i++) {
+          const weed = cfg.weeds[i];
+          if (weed.brackets !== tallest || eaten[i] !== 0) continue;
+          if (fish.some((other) => other !== f && other.eatWeed === i)) continue;
+
+          const plantTop = SCREEN_H - BASE_MARGIN - weedHeight(weed.brackets);
+          if (Math.abs(headX - weed.x) > FISH_EAT_REACH) continue;
+
+          if (rand(0, 99) >= cfg.fish_eat_chance) {
+            f.nextEatMs = now + 1500;
+            return;
+          }
+
+          f.eatTargetY = plantTop - GLYPH_H * f.scale;
+          f.eatStartMs = now;
+          f.eatEndMs = 0;
+          f.nextEatMs = now + FISH_EAT_COOLDOWN_MS;
+          f.eatWeed = i;
+          return;
+        }
+      }
+
+      function renderFish(f, index) {
+        const width = spriteWidth(f);
+
+        if (cfg.bubbles && now - f.nextBubbleMs >= 0) {
+          f.nextBubbleMs = now + cfg.bubble_every_ms;
+          if (rand(0, 99) < cfg.bubble_chance) {
+            const bubble = bubbles.find((b) => !b.active);
+            if (bubble) {
+              bubble.active = true;
+              bubble.y = Math.round(f.y) - BUBBLE_SIZE;
+              bubble.axisX = Math.round(f.x + width / 2);
+              bubble.phase = rand(0, SWAY_STEPS - 1);
+            }
+          }
+        }
+
+        if (f.eatWeed >= 0) {
+          const delta = f.eatTargetY - f.baseY;
+          const step = Math.abs(f.vx) * FISH_DIVE_FACTOR;
+          if (Math.abs(delta) <= step) {
+            f.baseY = f.eatTargetY;
+            if (f.eatEndMs === 0) f.eatEndMs = now + FISH_EAT_MS;
+          } else {
+            f.baseY += delta > 0 ? step : -step;
+          }
+
+          const arrived = f.eatEndMs !== 0;
+          if ((arrived && now - f.eatEndMs >= 0) || (!arrived && now - f.eatStartMs >= FISH_EAT_MAX_MS)) {
+            finishBite(f);
+          }
+        } else {
+          if (now - f.nextEventMs >= 0) applyImpulse(f);
+          if (now - f.nextEatMs >= 0) tryStartEating(f);
+        }
+
+        const nibbling = f.eatWeed >= 0;
+        const height = GLYPH_H * f.scale;
+
+        const waveAmp = FISH_WAVE_AMPLITUDE * f.scale;
+
+        if (!nibbling) {
+          f.x += f.vx;
+
+          if (cfg.fish_swim === "free") {
+            const maxBase = WATER_TOP + band - height - 2 * waveAmp - 1;
+            if (now - f.nextWanderMs >= 0) {
+              const room = maxBase > WATER_TOP ? maxBase - WATER_TOP : 0;
+              f.wanderY = WATER_TOP + rand(0, room);
+              f.nextWanderMs = now + rand(FISH_ROAM_MIN_MS, FISH_ROAM_MAX_MS);
+            }
+
+            const step = Math.abs(f.vx) * FISH_ROAM_FACTOR;
+            const drift = f.wanderY - f.baseY;
+            if (Math.abs(drift) <= step) f.baseY = f.wanderY;
+            else f.baseY += drift > 0 ? step : -step;
+          }
+        }
+
+        if (
+          (f.vx > 0 && f.x > SCREEN_W + FISH_MARGIN) ||
+          (f.vx < 0 && f.x + width < -FISH_MARGIN)
+        ) {
+          spawnFish(f, index);
+          return;
+        }
+
+        const bobIndex =
+          ((nibbling ? Math.floor(now / 15) : Math.floor((rnd(f.x) * SWAY_STEPS) / FISH_BOB_TRAVEL)) +
+            f.bobPhase) &
+          (SWAY_STEPS - 1);
+        const bob = Math.floor((SIN_LUT[bobIndex] * f.bobAmp) / SINE_FULL);
+
+        let targetY = rnd(f.baseY) + bob;
+        const maxY = WATER_TOP + band - height - 2 * waveAmp;
+        if (targetY > maxY) targetY = Math.max(maxY, WATER_TOP);
+        if (targetY < WATER_TOP) targetY = WATER_TOP;
+        f.y = targetY;
+
+        const drawX = rnd(f.x);
+        const drawY = targetY;
+
+        let squash = 1000;
+        if (f.turnEndMs !== 0) {
+          const remaining = f.turnEndMs - now;
+          if (remaining <= 0) {
+            f.turnEndMs = 0;
+            f.turnPending = 0;
+          } else {
+            const elapsed = FISH_TURN_MS - remaining;
+            const half = FISH_TURN_MS / 2;
+            if (elapsed >= half && f.turnPending !== 0) {
+              f.vx = -f.vx;
+              f.turnPending = 0;
+            }
+            const phase = elapsed < half ? half - elapsed : elapsed - half;
+            squash = FISH_TURN_SQUASH + Math.floor(((1000 - FISH_TURN_SQUASH) * phase * 2) / FISH_TURN_MS);
+          }
+        }
+
+        const facingRight = f.vx > 0;
+        const squashedWidth = Math.floor((width * squash) / 1000);
+        const originX = drawX + Math.floor((width - squashedWidth) / 2);
+        const originY = drawY - waveAmp;
+
+        const cellW = Math.max(1, Math.floor((CELL_W * f.scale * squash) / 1000));
+        const blockW = Math.max(1, Math.floor((f.scale * squash) / 1000));
+
+        const wavePhase =
+          ((nibbling ? Math.floor(now / 12) : Math.floor((rnd(f.x) * SWAY_STEPS) / FISH_WAVE_TRAVEL)) +
+            f.waveOffset) &
+          (SWAY_STEPS - 1);
+
+        ctx.fillStyle = rgb565(f.color);
+
+        for (let slot = 0; slot < f.glyphCount; slot++) {
+          const glyph = facingRight ? f.body[slot] : f.body[f.glyphCount - 1 - slot];
+
+          let shift = 0;
+          if (waveAmp > 0) {
+            const i = (wavePhase + f.waveOffset - slot * FISH_WAVE_SLOT_STEP) & (SWAY_STEPS - 1);
+            shift = Math.floor((SIN_LUT[i] * waveAmp) / SINE_FULL);
+          }
+
+          const cellX = originX + slot * cellW;
+
+          for (let row = 0; row < GLYPH_H; row++) {
+            const bits = GLYPHS[glyph][row];
+            if (bits === 0) continue;
+
+            for (let col = 0; col < GLYPH_W; col++) {
+              if (((bits >> (GLYPH_W - 1 - col)) & 1) === 0) continue;
+
+              const blockX = cellX + Math.floor(((facingRight ? col : GLYPH_W - 1 - col) * f.scale * squash) / 1000);
+              const blockY = originY + row * f.scale + shift;
+              ctx.fillRect(blockX, blockY, blockW, f.scale);
+            }
+          }
+        }
+      }
+
+      function updateBubbles() {
+        if (!cfg.bubbles) {
+          for (const bubble of bubbles) bubble.active = false;
+          return;
+        }
+
+        const rise = cfg.bubble_rise * FRAME_SECONDS;
+        ctx.fillStyle = "#fff";
+
+        for (const bubble of bubbles) {
+          if (!bubble.active) continue;
+
+          bubble.y -= rise;
+          bubble.phase = (bubble.phase + 1) & (SWAY_STEPS - 1);
+          if (bubble.y < WATER_TOP) {
+            bubble.active = false;
+            continue;
+          }
+
+          const sway = Math.floor((SIN_LUT[bubble.phase] * BUBBLE_SWAY) / SINE_FULL);
+          const x = bubble.axisX + sway;
+          const y = Math.round(bubble.y);
+
+          for (let row = 0; row < BUBBLE_SIZE; row++) {
+            for (let col = 0; col < BUBBLE_SIZE; col++) {
+              if (BUBBLE_ROWS[row] & (0x04 >> col)) ctx.fillRect(x + col, y + row, 1, 1);
+            }
+          }
+        }
+      }
+
+      function step() {
+        now += FRAME_MS;
+
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+        regrowWeeds();
+        updateBubbles();
+
+        const phase = Math.floor(now / cfg.sway_step_ms) % SWAY_STEPS;
+        for (let i = 0; i < cfg.weeds.length; i++) {
+          const levels = Math.max(1, cfg.weeds[i].brackets - eaten[i]);
+          renderWeed(cfg.weeds[i], levels, phase);
+        }
+
+        if (band >= GLYPH_H) {
+          for (let i = 0; i < fish.length; i++) renderFish(fish[i], i);
+        }
+      }
+
+      // ---------- controls (same grouping as the device panel) ----------
+      const panel = document.getElementById("panel");
+
+      function section(title) {
+        const heading = document.createElement("h2");
+        heading.className = "section-title";
+        heading.textContent = title;
+        panel.append(heading);
+      }
+
+      function card(title) {
+        const box = document.createElement("fieldset");
+        if (title) {
+          const legend = document.createElement("legend");
+          legend.textContent = title;
+          box.append(legend);
+        }
+        panel.append(box);
+        return box;
+      }
+
+      function slider(parent, key, title, min, max, unit) {
+        const label = document.createElement("label");
+        label.innerHTML = title + ': <em class="v"></em>' + (unit ? " " + unit : "");
+        const value = label.querySelector(".v");
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = min;
+        input.max = max;
+        input.value = cfg[key];
+
+        const show = () => {
+          value.textContent = cfg[key];
+        };
+        input.addEventListener("input", () => {
+          cfg[key] = Number(input.value);
+          show();
+          applyConfig();
+        });
+        show();
+
+        parent.append(label, input);
+        return {
+          sync() {
+            input.value = cfg[key];
+            show();
+          },
+        };
+      }
+
+      function select(parent, key, title, options) {
+        const label = document.createElement("label");
+        label.textContent = title;
+        const el = document.createElement("select");
+        for (const [value, text] of options) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = text;
+          el.append(option);
+        }
+        el.value = cfg[key];
+        el.addEventListener("change", () => {
+          cfg[key] = el.value;
+          applyConfig();
+        });
+        label.append(el);
+        parent.append(label);
+      }
+
+      function toggle(parent, key, title) {
+        const label = document.createElement("label");
+        label.className = "switch";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = cfg[key];
+        input.addEventListener("change", () => {
+          cfg[key] = input.checked;
+          applyConfig();
+        });
+        label.append(input, document.createTextNode(title));
+        parent.append(label);
+        return {
+          sync() {
+            input.checked = cfg[key];
+          },
+        };
+      }
+
+      function colourToHex(c) {
+        const r = Math.round((((c >> 11) & 0x1f) * 255) / 31);
+        const g = Math.round((((c >> 5) & 0x3f) * 255) / 63);
+        const b = Math.round(((c & 0x1f) * 255) / 31);
+        const hex = (v) => v.toString(16).padStart(2, "0");
+        return "#" + hex(r) + hex(g) + hex(b);
+      }
+
+      // --- Seaweed: how many plants, their colour, and one card per plant ---
+      section("Seaweed");
+      const plantsCard = card("Plants");
+
+      const countLabel = document.createElement("label");
+      countLabel.innerHTML = 'Count: <em id="weed-count"></em>';
+      const countInput = document.createElement("input");
+      countInput.type = "range";
+      countInput.min = 0;
+      countInput.max = 5;
+      countInput.value = cfg.weeds.length;
+      countInput.addEventListener("input", () => setWeedCount(Number(countInput.value)));
+      countLabel.append(countInput);
+      plantsCard.append(countLabel);
+
+      const colorLabel = document.createElement("label");
+      colorLabel.textContent = "Colour";
+      const colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.value = colourToHex(cfg.color);
+      colorInput.addEventListener("input", () => {
+        const hex = colorInput.value.replace("#", "");
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        cfg.color =
+          ((Math.round((r * 31) / 255) & 0x1f) << 11) |
+          ((Math.round((g * 63) / 255) & 0x3f) << 5) |
+          (Math.round((b * 31) / 255) & 0x1f);
+        applyConfig();
+      });
+      colorLabel.append(colorInput);
+      plantsCard.append(colorLabel);
+
+      const plantCards = document.createElement("div");
+      panel.append(plantCards);
+
+      function setWeedCount(count) {
+        const defaults = [
+          { x: 72, brackets: 2 },
+          { x: 168, brackets: 3 },
+          { x: 120, brackets: 2 },
+          { x: 48, brackets: 1 },
+          { x: 192, brackets: 1 },
+        ];
+        cfg.weeds = defaults.slice(0, count).map((w) => ({ ...w }));
+        document.getElementById("weed-count").textContent = cfg.weeds.length;
+        countInput.value = cfg.weeds.length;
+        resetBites();
+        renderPlants();
+        applyConfig();
+      }
+
+      function numberField(parent, caption, value, min, max, onChange) {
+        const label = document.createElement("label");
+        label.textContent = caption;
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = min;
+        input.max = max;
+        input.value = value;
+        input.addEventListener("input", () => onChange(input));
+        label.append(input);
+        parent.append(label);
+        return input;
+      }
+
+      function renderPlants() {
+        plantCards.innerHTML = "";
+        cfg.weeds.forEach((weed, index) => {
+          const box = document.createElement("fieldset");
+          box.className = "plant";
+          const legend = document.createElement("legend");
+          legend.textContent = "Seaweed " + (index + 1);
+          box.append(legend);
+
+          const row = document.createElement("div");
+          row.className = "row";
+          numberField(row, "X ", weed.x, 0, SCREEN_W - 1, (input) => {
+            weed.x = Math.min(SCREEN_W - 1, Math.max(0, Number(input.value) || 0));
+            applyConfig();
+          });
+          numberField(row, "Brackets ", weed.brackets, 1, 4, (input) => {
+            weed.brackets = Math.min(4, Math.max(1, Number(input.value) || 1));
+            applyConfig();
+          });
+
+          box.append(row);
+          plantCards.append(box);
+        });
+      }
+
+      // --- Seaweed shape ---
+      section("Seaweed shape");
+
+      const bracketCard = card("Bracket");
+      slider(bracketCard, "arc_height", "Height", 8, 40, "px");
+      slider(bracketCard, "arc_offset", "Overlap step", 2, 20, "px");
+      slider(bracketCard, "arc_bulge", "Curve", 0, 8, "px");
+      slider(bracketCard, "arc_stroke", "Thickness", 1, 3, "px");
+      slider(bracketCard, "stagger", "Horizontal stagger", 0, 8, "px");
+
+      const swayCard = card("Sway");
+      slider(swayCard, "sway_max", "Amplitude", 0, 8, "px");
+      slider(swayCard, "sway_phase_step", "Phase step", 0, 32, "");
+      slider(swayCard, "sway_step_ms", "Phase speed", 10, 200, "ms");
+
+      // --- Fish ---
+      section("Fish");
+
+      const populationCard = card("Population");
+      slider(populationCard, "fish_count", "Count", 0, 6, "");
+      slider(populationCard, "fish_scale_min", "Min size", 1, 3, "\u00d7");
+      slider(populationCard, "fish_scale_max", "Max size", 1, 3, "\u00d7");
+
+      const motionCard = card("Motion");
+      slider(motionCard, "fish_speed_min", "Min speed", 5, 120, "px/s");
+      slider(motionCard, "fish_speed_max", "Max speed", 5, 120, "px/s");
+      slider(motionCard, "fish_bob_min", "Min bob", 0, 6, "px");
+      slider(motionCard, "fish_bob_max", "Max bob", 0, 6, "px");
+      select(motionCard, "fish_swim", "Swim", [
+        ["free", "Free, anywhere in the tank"],
+        ["lanes", "Lanes, one per fish"],
+      ]);
+      toggle(motionCard, "fish_turn_anim", "Animated turns");
+
+      const bubblesCard = card("Bubbles");
+      toggle(bubblesCard, "bubbles", "Fish let bubbles go");
+      slider(bubblesCard, "bubble_chance", "Chance", 0, 100, "%");
+      slider(bubblesCard, "bubble_every_ms", "Every", 300, 10000, "ms");
+      slider(bubblesCard, "bubble_rise", "Rise speed", 2, 80, "px/s");
+
+      // --- Feeding ---
+      section("Feeding");
+
+      const bitesCard = card("Bites");
+      toggle(bitesCard, "weed_eat", "Fish can eat seaweed");
+      slider(bitesCard, "fish_eat_chance", "Bite chance", 0, 100, "%");
+      slider(bitesCard, "weed_grow_s", "Brackets grow back in", 0, 120, "s");
+
+      const reset = document.createElement("button");
+      reset.textContent = "Reset";
+      reset.addEventListener("click", () => {
+        location.reload();
+      });
+      panel.append(reset);
+
+      document.getElementById("weed-count").textContent = cfg.weeds.length;
+      renderPlants();
+
+      // ---------- go ----------
+      resetBites();
+      applyConfig();
+      setInterval(step, FRAME_MS);
+    </script>
+  </body>
+</html>

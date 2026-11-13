@@ -49,6 +49,9 @@ void handleDisplayRotationSet(Webserver* webserver);
 void handleTokenCheck(Webserver* webserver);
 void handleTokenSave(Webserver* webserver);
 
+void handleAquariumGet(Webserver* webserver);
+void handleAquariumSet(Webserver* webserver);
+
 void handleLogsGet(Webserver* webserver);
 void handleLogsDownload(Webserver* webserver);
 void handleLogsClear(Webserver* webserver);

@@ -25,6 +25,7 @@
 #include "web/Webserver.h"
 #include "web/Api.h"
 #include "display/DisplayManager.h"
+#include "aquarium/AquariumManager.h"
 
 #include "config/ConfigManager.h"
 #include "wireless/WiFiManager.h"
@@ -52,6 +53,8 @@ static void otaHandleAborted(HTTPUpload& upload);
 void handleDeleteGif(Webserver* webserver);
 void handleBrightnessGet(Webserver* webserver);
 void handleBrightnessSet(Webserver* webserver);
+void handleAquariumGet(Webserver* webserver);
+void handleAquariumSet(Webserver* webserver);
 
 static constexpr int WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr size_t NTP_CONFIG_DOC_SIZE = 512;
@@ -177,6 +180,16 @@ void registerApiEndpoints(Webserver* webserver) {
 
     webserver->raw().on("/api/v1/display/brightness", HTTP_GET, [webserver]() { handleBrightnessGet(webserver); });
     webserver->raw().on("/api/v1/display/brightness", HTTP_POST, [webserver]() { handleBrightnessSet(webserver); });
+
+    // @openapi {get} /aquarium version=v1 group=Aquarium summary="Get aquarium scene settings" requiresAuth=true
+    // responses=200:application/json,401:application/json
+    webserver->raw().on("/api/v1/aquarium", HTTP_GET, [webserver]() { handleAquariumGet(webserver); });
+
+    // @openapi {post} /aquarium version=v1 group=Aquarium summary="Apply aquarium scene settings" requiresAuth=true
+    // requestBody=application/json requestBodySchema=arc_height:integer,arc_offset:integer,arc_bulge:integer,arc_stroke:integer,stagger:integer,sway_max:integer,sway_phase_step:integer,sway_step_ms:integer,color:integer,weed_count:integer,fish_count:integer,fish_scale_min:integer,fish_scale_max:integer,fish_speed_min:integer,fish_speed_max:integer,fish_bob_min:integer,fish_bob_max:integer,fish_turn_anim:boolean,fish_swim:string,bubbles:boolean,bubble_chance:integer,bubble_rise:integer,bubble_every_ms:integer,weed_grow_s:integer,weed_eat:boolean,fish_eat_chance:integer,weeds:array,persist:boolean
+    // example={"arc_height":27,"sway_max":4,"persist":true}
+    // responses=200:application/json,400:application/json,401:application/json
+    webserver->raw().on("/api/v1/aquarium", HTTP_POST, [webserver]() { handleAquariumSet(webserver); });
 
     webserver->raw().onNotFound([webserver]() {
         if (webserver->raw().method() == HTTP_OPTIONS) {
@@ -1034,7 +1047,9 @@ void handleOtaFinished(Webserver* webserver) {
     setCorsHeaders(webserver);
     webserver->raw().send(HTTP_CODE_OK, "application/json", json);
 
-    if (!otaError) {
+    if (otaError) {
+        AquariumManager::pause(false);
+    } else {
         delay(rebootDelayMs);
         ESP.restart();  // NOLINT(readability-static-accessed-through-instance)
     }
@@ -1370,6 +1385,8 @@ void handleWifiStatus(Webserver* webserver) {
 static void otaHandleStart(HTTPUpload& upload, int mode) {
     Logger::info((String("OTA start: ") + upload.filename).c_str(), "API::OTA");
 
+    AquariumManager::pause(true);
+
     otaError = false;
     otaSize = 0;
     otaStatus = "";
@@ -1482,6 +1499,8 @@ static void otaHandleAborted(HTTPUpload& /*upload*/) {
     otaStatus = "Update aborted";
     otaInProgress = false;
     otaCancelRequested = false;
+
+    AquariumManager::pause(false);
 
     DisplayManager::drawTextWrapped(OTA_TEXT_X_OFFSET, OTA_TEXT_Y_OFFSET, "Aborted", 2, LCD_WHITE, LCD_BLACK, true);
     DisplayManager::drawLoadingBar(0.0F, OTA_LOADING_Y_OFFSET);
@@ -1626,6 +1645,192 @@ void handleBrightnessSet(Webserver* webserver) {
     doc["brightness"] = brightness;
     String json;
     serializeJson(doc, json);
+    setCorsHeaders(webserver);
+    webserver->raw().send(HTTP_CODE_OK, "application/json", json);
+}
+
+/**
+ * @brief Return the current aquarium scene settings
+ */
+void handleAquariumGet(Webserver* webserver) {
+    if (!requireBearerToken(webserver)) {
+        return;
+    }
+
+    const AquariumConfig& cfg = AquariumManager::config();
+
+    JsonDocument doc;
+    doc["arc_height"] = cfg.arcHeight;
+    doc["arc_offset"] = cfg.arcOffset;
+    doc["arc_bulge"] = cfg.arcBulge;
+    doc["arc_stroke"] = cfg.arcStroke;
+    doc["stagger"] = cfg.stagger;
+    doc["sway_max"] = cfg.swayMax;
+    doc["sway_phase_step"] = cfg.swayPhaseStep;
+    doc["sway_step_ms"] = cfg.swayStepMs;
+    doc["color"] = cfg.color;
+    doc["fish_count"] = cfg.fishCount;
+    doc["fish_scale_min"] = cfg.fishScaleMin;
+    doc["fish_scale_max"] = cfg.fishScaleMax;
+    doc["fish_speed_min"] = cfg.fishSpeedMin;
+    doc["fish_speed_max"] = cfg.fishSpeedMax;
+    doc["fish_bob_min"] = cfg.fishBobMin;
+    doc["fish_bob_max"] = cfg.fishBobMax;
+    doc["fish_turn_anim"] = cfg.fishTurnAnim;
+    doc["fish_swim"] = (cfg.fishSwim == FishSwim::Lanes) ? "lanes" : "free";
+    doc["bubbles"] = cfg.bubbles;
+    doc["bubble_chance"] = cfg.bubbleChance;
+    doc["bubble_rise"] = cfg.bubbleRise;
+    doc["bubble_every_ms"] = cfg.bubbleEveryMs;
+    doc["weed_grow_s"] = cfg.weedGrowS;
+    doc["weed_eat"] = cfg.weedEat;
+    doc["fish_eat_chance"] = cfg.fishEatChance;
+
+    JsonArray weeds = doc["weeds"].to<JsonArray>();
+    for (uint8_t i = 0; i < cfg.weedCount; ++i) {
+        JsonObject weed = weeds.add<JsonObject>();
+        weed["x"] = cfg.weeds[i].axisX;
+        weed["brackets"] = cfg.weeds[i].brackets;
+    }
+
+    String json;
+    serializeJson(doc, json);
+
+    setCorsHeaders(webserver);
+    webserver->raw().send(HTTP_CODE_OK, "application/json", json);
+}
+
+/**
+ * @brief Apply aquarium settings live, optionally saving them to LittleFS
+ *
+ * The body may contain any subset of the settings; {"persist": true} writes
+ * them to /aquarium.json so they survive a reboot.
+ */
+void handleAquariumSet(Webserver* webserver) {
+    if (!requireBearerToken(webserver)) {
+        return;
+    }
+
+    if (!webserver->raw().hasArg("plain") || webserver->raw().arg("plain").length() == 0) {
+        JsonDocument doc;
+        doc["status"] = "error";
+        doc["message"] = "Missing JSON body";
+
+        String json;
+        serializeJson(doc, json);
+
+        setCorsHeaders(webserver);
+        webserver->raw().send(HTTP_CODE_BAD_REQUEST, "application/json", json);
+
+        return;
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, webserver->raw().arg("plain"))) {
+        JsonDocument resp;
+        resp["status"] = "error";
+        resp["message"] = "Invalid JSON";
+
+        String json;
+        serializeJson(resp, json);
+
+        setCorsHeaders(webserver);
+        webserver->raw().send(HTTP_CODE_BAD_REQUEST, "application/json", json);
+
+        return;
+    }
+
+    AquariumConfig cfg = AquariumManager::config();
+
+    cfg.arcHeight = static_cast<int16_t>(doc["arc_height"] | static_cast<int>(cfg.arcHeight));
+    cfg.arcOffset = static_cast<int16_t>(doc["arc_offset"] | static_cast<int>(cfg.arcOffset));
+    cfg.arcBulge = static_cast<int16_t>(doc["arc_bulge"] | static_cast<int>(cfg.arcBulge));
+    cfg.arcStroke = static_cast<int16_t>(doc["arc_stroke"] | static_cast<int>(cfg.arcStroke));
+    cfg.stagger = static_cast<int16_t>(doc["stagger"] | static_cast<int>(cfg.stagger));
+    cfg.swayMax = static_cast<int16_t>(doc["sway_max"] | static_cast<int>(cfg.swayMax));
+    cfg.swayPhaseStep = static_cast<int16_t>(doc["sway_phase_step"] | static_cast<int>(cfg.swayPhaseStep));
+    cfg.swayStepMs = static_cast<uint16_t>(doc["sway_step_ms"] | static_cast<int>(cfg.swayStepMs));
+    cfg.color = static_cast<uint16_t>(doc["color"] | static_cast<int>(cfg.color));
+    cfg.fishCount = static_cast<uint8_t>(doc["fish_count"] | static_cast<int>(cfg.fishCount));
+    cfg.fishScaleMin = static_cast<int16_t>(doc["fish_scale_min"] | static_cast<int>(cfg.fishScaleMin));
+    cfg.fishScaleMax = static_cast<int16_t>(doc["fish_scale_max"] | static_cast<int>(cfg.fishScaleMax));
+    cfg.fishSpeedMin = static_cast<int16_t>(doc["fish_speed_min"] | static_cast<int>(cfg.fishSpeedMin));
+    cfg.fishSpeedMax = static_cast<int16_t>(doc["fish_speed_max"] | static_cast<int>(cfg.fishSpeedMax));
+    cfg.fishBobMin = static_cast<int16_t>(doc["fish_bob_min"] | static_cast<int>(cfg.fishBobMin));
+    cfg.fishBobMax = static_cast<int16_t>(doc["fish_bob_max"] | static_cast<int>(cfg.fishBobMax));
+    cfg.fishTurnAnim = doc["fish_turn_anim"] | cfg.fishTurnAnim;
+    if (doc["fish_swim"].is<const char*>()) {
+        const String swim = doc["fish_swim"].as<const char*>();
+        if (swim == "lanes") {
+            cfg.fishSwim = FishSwim::Lanes;
+        } else if (swim == "free") {
+            cfg.fishSwim = FishSwim::Free;
+        } else {
+            JsonDocument resp;
+            resp["status"] = "error";
+            resp["message"] = "fish_swim must be lanes or free";
+
+            String json;
+            serializeJson(resp, json);
+
+            setCorsHeaders(webserver);
+            webserver->raw().send(HTTP_CODE_BAD_REQUEST, "application/json", json);
+
+            return;
+        }
+    }
+    cfg.weedGrowS = static_cast<uint16_t>(doc["weed_grow_s"] | static_cast<int>(cfg.weedGrowS));
+    cfg.weedEat = doc["weed_eat"] | cfg.weedEat;
+    cfg.fishEatChance = static_cast<uint8_t>(doc["fish_eat_chance"] | static_cast<int>(cfg.fishEatChance));
+    cfg.bubbles = doc["bubbles"] | cfg.bubbles;
+    cfg.bubbleChance = static_cast<uint8_t>(doc["bubble_chance"] | static_cast<int>(cfg.bubbleChance));
+    cfg.bubbleRise = static_cast<int16_t>(doc["bubble_rise"] | static_cast<int>(cfg.bubbleRise));
+    cfg.bubbleEveryMs =
+        static_cast<uint16_t>(doc["bubble_every_ms"] | static_cast<int>(cfg.bubbleEveryMs));
+
+    if (doc["weeds"].is<JsonArray>()) {
+        uint8_t count = 0;
+        for (JsonObject weed : doc["weeds"].as<JsonArray>()) {
+            if (count >= AQUARIUM_MAX_WEEDS) {
+                break;
+            }
+
+            cfg.weeds[count].axisX = static_cast<int16_t>(weed["x"] | static_cast<int>(cfg.weeds[count].axisX));
+            cfg.weeds[count].brackets =
+                static_cast<uint8_t>(weed["brackets"] | static_cast<int>(cfg.weeds[count].brackets));
+            ++count;
+        }
+
+        // An explicit empty array means no seaweed at all, so the count is taken as sent.
+        cfg.weedCount = count;
+    }
+
+    if (!AquariumManager::applyConfig(cfg)) {
+        JsonDocument resp;
+        resp["status"] = "error";
+        resp["message"] = AquariumManager::lastError();
+
+        String json;
+        serializeJson(resp, json);
+
+        setCorsHeaders(webserver);
+        webserver->raw().send(HTTP_CODE_BAD_REQUEST, "application/json", json);
+
+        return;
+    }
+
+    const bool persist = doc["persist"] | false;
+    if (persist) {
+        AquariumManager::saveConfig();
+    }
+
+    JsonDocument resp;
+    resp["status"] = "ok";
+    resp["persisted"] = persist;
+
+    String json;
+    serializeJson(resp, json);
+
     setCorsHeaders(webserver);
     webserver->raw().send(HTTP_CODE_OK, "application/json", json);
 }

@@ -13,4 +13,6 @@ document.addEventListener("alpine:init", () => {
     Alpine.data("rebootHandler", rebootHandler);
   if (typeof tokenHandler !== "undefined")
     Alpine.data("tokenHandler", tokenHandler);
+  if (typeof aquariumHandler !== "undefined")
+    Alpine.data("aquariumHandler", aquariumHandler);
 });

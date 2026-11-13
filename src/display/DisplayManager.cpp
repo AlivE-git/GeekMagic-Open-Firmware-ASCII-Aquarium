@@ -732,6 +732,13 @@ auto DisplayManager::stopGif() -> bool {
     return true;
 }
 /**
+ * @brief Check whether a GIF currently owns the display
+ *
+ * @return true while the GIF decoder is playing
+ */
+auto DisplayManager::isGifPlaying() -> bool { return (g_gif != nullptr) && g_gif->isPlaying(); }
+
+/**
  * @brief Update the GIF decoder (should be called regularly in loop)
  *
  * @return void

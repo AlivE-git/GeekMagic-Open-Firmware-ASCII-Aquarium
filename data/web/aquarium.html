@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aquarium</title>
+    <link rel="stylesheet" href="./css/pico.min.css" />
+    <link rel="stylesheet" href="./css/style.css" />
+    <script src="./js/alpinejs.min.js" defer></script>
+    <script src="./js/utils.js"></script>
+    <script src="./js/themeSwitcher.js"></script>
+    <script src="./js/aquariumHandler.js"></script>
+    <script src="./js/main.js"></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <header id="header-placeholder"></header>
+
+      <a href="./index.html" class="wifi-back-link">← Back to Home</a>
+
+      <section x-data="aquariumHandler()" x-init="init()">
+        <h2>Aquarium</h2>
+
+        <p>
+          Changes are applied to the screen immediately. Press
+          <strong>Save</strong> to keep them after a reboot.
+        </p>
+
+        <h3>Seaweed</h3>
+
+        <fieldset class="aquarium-group">
+          <legend>Plants</legend>
+
+          <label for="weed-count">Count: <span x-text="cfg.weeds.length"></span></label>
+          <input
+            id="weed-count"
+            type="range"
+            min="0"
+            max="5"
+            x-bind:value="cfg.weeds.length"
+            x-on:input="setWeedCount($event.target.value)"
+          />
+
+          <label for="seaweed-color">Color</label>
+          <input
+            id="seaweed-color"
+            type="color"
+            x-bind:value="colorHex"
+            x-on:input="onColor($event)"
+            aria-label="Seaweed color"
+          />
+        </fieldset>
+
+        <template x-for="(weed, index) in cfg.weeds" :key="index">
+          <fieldset class="aquarium-group">
+            <legend x-text="'Seaweed ' + (index + 1)"></legend>
+
+            <label>
+              X position
+              <input
+                type="number"
+                min="0"
+                max="239"
+                x-model.number="weed.x"
+                x-on:input="push()"
+              />
+            </label>
+
+            <label>
+              Brackets
+              <input type="number" min="1" max="4" x-model.number="weed.brackets" x-on:input="push()" />
+            </label>
+          </fieldset>
+        </template>
+
+        <h3>Seaweed shape</h3>
+
+        <fieldset class="aquarium-group">
+          <legend>Bracket</legend>
+
+          <label for="arc-height">Height: <span x-text="cfg.arc_height"></span> px</label>
+          <input
+            id="arc-height"
+            type="range"
+            min="8"
+            max="40"
+            x-model.number="cfg.arc_height"
+            x-on:input="push()"
+          />
+
+          <label for="arc-offset">Overlap step: <span x-text="cfg.arc_offset"></span> px</label>
+          <input
+            id="arc-offset"
+            type="range"
+            min="2"
+            max="20"
+            x-model.number="cfg.arc_offset"
+            x-on:input="push()"
+          />
+
+          <label for="arc-bulge">Curve: <span x-text="cfg.arc_bulge"></span> px</label>
+          <input
+            id="arc-bulge"
+            type="range"
+            min="0"
+            max="8"
+            x-model.number="cfg.arc_bulge"
+            x-on:input="push()"
+          />
+
+          <label for="arc-stroke">Line thickness: <span x-text="cfg.arc_stroke"></span> px</label>
+          <input
+            id="arc-stroke"
+            type="range"
+            min="1"
+            max="3"
+            x-model.number="cfg.arc_stroke"
+            x-on:input="push()"
+          />
+
+          <label for="stagger">Horizontal stagger: <span x-text="cfg.stagger"></span> px</label>
+          <input
+            id="stagger"
+            type="range"
+            min="0"
+            max="8"
+            x-model.number="cfg.stagger"
+            x-on:input="push()"
+          />
+        </fieldset>
+
+        <fieldset class="aquarium-group">
+          <legend>Sway</legend>
+
+          <label for="sway-max">Amplitude: <span x-text="cfg.sway_max"></span> px</label>
+          <input
+            id="sway-max"
+            type="range"
+            min="0"
+            max="8"
+            x-model.number="cfg.sway_max"
+            x-on:input="push()"
+          />
+
+          <label for="sway-phase">Phase step between brackets: <span x-text="cfg.sway_phase_step"></span></label>
+          <input
+            id="sway-phase"
+            type="range"
+            min="0"
+            max="32"
+            x-model.number="cfg.sway_phase_step"
+            x-on:input="push()"
+          />
+          <small>0 makes the weed lean as a whole, larger values make a travelling wave.</small>
+
+          <label for="sway-step">Speed: <span x-text="(64 * cfg.sway_step_ms / 1000).toFixed(1)"></span> s per cycle</label>
+          <input
+            id="sway-step"
+            type="range"
+            min="10"
+            max="200"
+            x-model.number="cfg.sway_step_ms"
+            x-on:input="push()"
+          />
+        </fieldset>
+
+        <h3>Fish</h3>
+
+        <fieldset class="aquarium-group">
+          <legend>Population</legend>
+
+          <label for="fish-count">Count: <span x-text="cfg.fish_count"></span></label>
+          <input
+            id="fish-count"
+            type="range"
+            min="0"
+            max="6"
+            x-model.number="cfg.fish_count"
+            x-on:input="push()"
+          />
+
+          <label for="fish-scale-min">Min size: <span x-text="cfg.fish_scale_min"></span>&times;</label>
+          <input
+            id="fish-scale-min"
+            type="range"
+            min="1"
+            max="3"
+            x-model.number="cfg.fish_scale_min"
+            x-on:input="push()"
+          />
+
+          <label for="fish-scale-max">Max size: <span x-text="cfg.fish_scale_max"></span>&times;</label>
+          <input
+            id="fish-scale-max"
+            type="range"
+            min="1"
+            max="3"
+            x-model.number="cfg.fish_scale_max"
+            x-on:input="push()"
+          />
+        </fieldset>
+
+        <fieldset class="aquarium-group">
+          <legend>Motion</legend>
+
+          <label for="fish-speed-min">Min speed: <span x-text="cfg.fish_speed_min"></span> px/s</label>
+          <input
+            id="fish-speed-min"
+            type="range"
+            min="5"
+            max="120"
+            x-model.number="cfg.fish_speed_min"
+            x-on:input="push()"
+          />
+
+          <label for="fish-speed-max">Max speed: <span x-text="cfg.fish_speed_max"></span> px/s</label>
+          <input
+            id="fish-speed-max"
+            type="range"
+            min="5"
+            max="120"
+            x-model.number="cfg.fish_speed_max"
+            x-on:input="push()"
+          />
+
+          <label for="fish-bob-min">Min bob: <span x-text="cfg.fish_bob_min"></span> px</label>
+          <input
+            id="fish-bob-min"
+            type="range"
+            min="0"
+            max="6"
+            x-model.number="cfg.fish_bob_min"
+            x-on:input="push()"
+          />
+
+          <label for="fish-bob-max">Max bob: <span x-text="cfg.fish_bob_max"></span> px</label>
+          <input
+            id="fish-bob-max"
+            type="range"
+            min="0"
+            max="6"
+            x-model.number="cfg.fish_bob_max"
+            x-on:input="push()"
+          />
+
+          <label for="fish-swim">Swim</label>
+          <select id="fish-swim" x-model="cfg.fish_swim" x-on:change="push()">
+            <option value="free">Free, anywhere in the tank</option>
+            <option value="lanes">Lanes, one per fish</option>
+          </select>
+
+          <label for="fish-turn-anim">
+            <input
+              id="fish-turn-anim"
+              type="checkbox"
+              role="switch"
+              x-model="cfg.fish_turn_anim"
+              x-on:change="push()"
+            />
+            Animated turns
+          </label>
+        </fieldset>
+
+        <fieldset class="aquarium-group">
+          <legend>Bubbles</legend>
+
+          <label for="bubbles">
+            <input id="bubbles" type="checkbox" role="switch" x-model="cfg.bubbles" x-on:change="push()" />
+            Fish let bubbles go
+          </label>
+
+          <label for="bubble-chance">Chance: <span x-text="cfg.bubble_chance"></span> %</label>
+          <input id="bubble-chance" type="range" min="0" max="100" x-model.number="cfg.bubble_chance" x-on:input="push()" />
+
+          <label for="bubble-every">Every: <span x-text="(cfg.bubble_every_ms / 1000).toFixed(1)"></span> s</label>
+          <input id="bubble-every" type="range" min="300" max="10000" step="100" x-model.number="cfg.bubble_every_ms" x-on:input="push()" />
+
+          <label for="bubble-rise">Rise speed: <span x-text="cfg.bubble_rise"></span> px/s</label>
+          <input id="bubble-rise" type="range" min="2" max="80" x-model.number="cfg.bubble_rise" x-on:input="push()" />
+        </fieldset>
+
+        <small>
+          Species: &gt;&lt;&deg;&gt;, &gt;&lt;))&deg;&gt;, &gt;&lt;)))&deg;&gt;, &gt;&lt;((&deg;&gt;, &gt;)))&deg;&gt;,
+          and the same four bodies in curly braces: &gt;&lt;&#125;&#125;&deg;&gt;,
+          &gt;&lt;&#125;&#125;&#125;&deg;&gt;, &gt;&lt;&#123;&#123;&deg;&gt; and &gt;&#125;&#125;&#125;&deg;&gt;.
+          Size is the glyph scale: &times;1 is 17&ndash;29 px long, &times;3 is 51&ndash;87 px. Species, color, size,
+          speed and bob are
+          rolled when a fish enters the screen and stay with it until it leaves. The body undulates on
+          its own and both the bend and the vertical bob keep time with the distance swum, so a fast
+          fish bends and rocks faster and both turn around together with the fish. From time to time a
+          fish picks a new speed or turns around; with <strong>Animated turns</strong> on it flips on the
+          spot, with it off it simply snaps the other way.
+        </small>
+
+        <h3>Feeding</h3>
+
+        <fieldset class="aquarium-group">
+          <legend>Bites</legend>
+
+        <label for="weed-eat">
+          <input
+            id="weed-eat"
+            type="checkbox"
+            role="switch"
+            x-model="cfg.weed_eat"
+            x-on:change="push()"
+          />
+          Fish can eat seaweed
+        </label>
+
+        <label for="fish-eat-chance">Bite chance: <span x-text="cfg.fish_eat_chance"></span> %</label>
+        <input
+          id="fish-eat-chance"
+          type="range"
+          min="0"
+          max="100"
+          x-model.number="cfg.fish_eat_chance"
+          x-on:input="push()"
+        />
+
+        <label for="weed-grow">Bitten brackets grow back in: <span x-text="cfg.weed_grow_s"></span> s</label>
+        <input
+          id="weed-grow"
+          type="range"
+          min="0"
+          max="120"
+          x-model.number="cfg.weed_grow_s"
+          x-on:input="push()"
+        />
+
+        <small>
+          With <strong>Fish can eat seaweed</strong> on, a fish swimming right over the tip of the
+          tallest seaweed may stop and bite one bracket off, at the chance set above; while that plant
+          grows back there is nothing else to eat. Switching it off leaves every plant at the length
+          set in <strong>Seaweed</strong> and rules out further bites.
+        </small>
+        </fieldset>
+
+        <div style="margin-top: 1em; display: flex; gap: 0.5em; flex-wrap: wrap">
+          <button type="button" class="primary" x-on:click="save()" x-bind:disabled="loading">
+            Save
+          </button>
+          <button type="button" class="secondary" x-on:click="load()" x-bind:disabled="loading">
+            Refresh
+          </button>
+        </div>
+
+        <p x-text="statusMsg"></p>
+      </section>
+
+      <footer id="footer-placeholder"></footer>
+    </main>
+  </body>
+</html>
