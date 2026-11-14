@@ -1585,8 +1585,12 @@ void handleBrightnessGet(Webserver* webserver) {
 }
 
 /**
- * @brief Set LCD brightness (0-100), persists to config
- * Body: {"brightness": 80}
+ * @brief Set LCD brightness (0-100)
+ *
+ * Body: {"brightness": 80} or {"brightness": 80, "persist": true}
+ *
+ * Without "persist" the value is only kept in RAM until the next reboot, so the panel can be dimmed
+ * without touching the flash; with it the setting is written to /config.json.
  */
 void handleBrightnessSet(Webserver* webserver) {
     if (!requireBearerToken(webserver)) return;
@@ -1626,13 +1630,19 @@ void handleBrightnessSet(Webserver* webserver) {
         return;
     }
 
-    configManager.setLcdBrightness(static_cast<uint8_t>(brightness));
-    DisplayManager::setBrightness(static_cast<uint8_t>(brightness));
+    const bool persist = ddoc["persist"] | false;
+    const uint8_t value = static_cast<uint8_t>(brightness);
+    const uint8_t previous = configManager.getLcdBrightness();
 
-    if (!configManager.save()) {
+    configManager.setLcdBrightness(value);
+
+    if (persist && !configManager.save()) {
+        // Leave the setting untouched rather than half applied: nothing on screen or on flash changed.
+        configManager.setLcdBrightness(previous);
         JsonDocument doc;
         doc["status"] = "error";
         doc["message"] = "Failed to save config";
+        doc["persisted"] = false;
         String json;
         serializeJson(doc, json);
         setCorsHeaders(webserver);
@@ -1640,9 +1650,12 @@ void handleBrightnessSet(Webserver* webserver) {
         return;
     }
 
+    DisplayManager::setBrightness(value);
+
     JsonDocument doc;
     doc["status"] = "ok";
     doc["brightness"] = brightness;
+    doc["persisted"] = persist;
     String json;
     serializeJson(doc, json);
     setCorsHeaders(webserver);

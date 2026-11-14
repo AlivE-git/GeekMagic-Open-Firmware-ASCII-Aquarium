@@ -23,10 +23,24 @@
         <section x-data="displayHandler()" x-init="init()">
 
             <h2>Brightness</h2>
-            <div style="display: flex; align-items: center; gap: 1em;">
-                <input type="range" min="0" max="100" style="flex: 1" x-bind:value="brightness"
-                    x-on:input="setBrightness($event.target.value)" />
-                <span x-text="brightness + '%'" style="min-width: 3em; text-align: right;"></span>
+
+            <div x-show="ready">
+                <div style="display: flex; align-items: center; gap: 1em;">
+                    <input type="range" min="0" max="100" style="flex: 1" x-bind:value="brightness"
+                        x-on:input="setBrightness($event.target.value)" />
+                    <span x-text="brightness + '%'" style="min-width: 4em; text-align: right;"></span>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 1em; margin-top: 1em;">
+                    <button x-on:click="save()" x-bind:disabled="saving"
+                        x-text="saving ? 'Saving...' : 'Save'"></button>
+                    <small x-show="status" x-text="status"></small>
+                </div>
+
+                <small>
+                    The slider takes effect straight away but is forgotten on reboot. <strong>Save</strong>
+                    keeps it.
+                </small>
             </div>
 
         </section>

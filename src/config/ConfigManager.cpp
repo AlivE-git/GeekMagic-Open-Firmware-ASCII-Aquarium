@@ -37,6 +37,13 @@ auto ConfigManager::load() -> bool {
         return false;
     }
 
+    // The network credentials live in SecureStorage, the JSON file only ever carries the rest. Read
+    // them first: a missing or freshly wiped config file must not leave the device without them,
+    // otherwise the next save would write the blanks back and lock the device out of its network.
+    this->ssid = secure.get("wifi_ssid", "").c_str();
+    this->password = secure.get("wifi_password", "").c_str();
+    this->api_token = secure.get("api_token", "").c_str();
+
     File file = LittleFS.open(filename.c_str(), "r");
     if (!file) {
         Logger::error("Failed to open config file", "ConfigManager");
@@ -198,8 +205,14 @@ auto ConfigManager::save() -> bool {
 
     JsonDocument doc;
 
-    secure.put("wifi_ssid", this->getSSID());
-    secure.put("wifi_password", this->getPassword());
+    // Only ever refresh the stored credentials, never blank them: a wiped config file leaves the RAM
+    // copies empty, and saving those over the good ones would cut the device off its own network.
+    if (!this->ssid.empty()) {
+        secure.put("wifi_ssid", this->ssid.c_str());
+    }
+    if (!this->password.empty()) {
+        secure.put("wifi_password", this->password.c_str());
+    }
 
     doc["lcd_rotation"] = lcd_rotation;
 

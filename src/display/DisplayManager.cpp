@@ -209,30 +209,39 @@ static constexpr uint8_t ST7789_ADDR_END_LOW = 0xEF;
  */
 auto DisplayManager::getGfx() -> Arduino_GFX* { return &g_lcd; }
 
-/**
- * @brief Turn the LCD backlight on
- *
- * @return void
- */
-static inline void lcdBacklightOn() {
-    pinMode((uint8_t)LCD_BACKLIGHT_GPIO, OUTPUT);
-    digitalWrite((uint8_t)LCD_BACKLIGHT_GPIO, LCD_BACKLIGHT_ACTIVE_LOW ? LOW : HIGH);
-}
+/// 10-bit PWM at 20 kHz: fine enough steps that the dimming is smooth, fast enough that neither the
+/// eye nor the ear catches the switching.
+constexpr uint16_t BACKLIGHT_PWM_RANGE = 1023;
+constexpr uint32_t BACKLIGHT_PWM_HZ = 20000;
+/// Perceived brightness is far from linear in duty cycle; without this the bottom half of the slider
+/// looks almost the same as the top.
+constexpr float BACKLIGHT_GAMMA = 2.2F;
+/// Duty left at slider 0, so the panel dims right down without going completely dark.
+constexpr float BACKLIGHT_MIN_ON = 0.02F;
 
 /**
- * @brief Set backlight brightness via PWM (0 = off, 100 = full)
+ * @brief Set the backlight brightness, 0..100 as the eye sees it
+ *
+ * @param percent 0 is as dim as the panel goes, 100 is full power
  */
 void DisplayManager::setBrightness(uint8_t percent) {
-    const uint16_t PWM_MIN = 778;
-    const uint16_t PWM_MAX = 1023;
-
-    if (percent > 100) percent = 100;
-    // analogWrite range 0-1023; backlight is active-low so invert
-    // int pwmVal = LCD_BACKLIGHT_ACTIVE_LOW ? ((100 - percent) * 1023 / 100) : (percent * 1023 / 100);
-    uint16_t pwmVal = PWM_MIN + (uint16_t)((percent * (PWM_MAX - PWM_MIN)) / 100);
-    if (LCD_BACKLIGHT_ACTIVE_LOW) {
-        pwmVal = 1023 - pwmVal;
+    if (percent > 100) {
+        percent = 100;
     }
+
+    // The ESP8266 core 3.x defaults analogWrite() to a 0..255 range, so the 10-bit range has to be
+    // asked for; without this every value below would be clamped and the slider would do nothing.
+    static bool pwmConfigured = false;
+    if (!pwmConfigured) {
+        analogWriteRange(BACKLIGHT_PWM_RANGE);
+        analogWriteFreq(BACKLIGHT_PWM_HZ);
+        pwmConfigured = true;
+    }
+
+    const float linear = static_cast<float>(percent) / 100.0F;
+    const float on = BACKLIGHT_MIN_ON + ((1.0F - BACKLIGHT_MIN_ON) * powf(linear, BACKLIGHT_GAMMA));
+    const float highTime = LCD_BACKLIGHT_ACTIVE_LOW ? (1.0F - on) : on;
+    const uint16_t pwmVal = static_cast<uint16_t>((highTime * BACKLIGHT_PWM_RANGE) + 0.5F);
 
     pinMode((uint8_t)LCD_BACKLIGHT_GPIO, OUTPUT);
     analogWrite((uint8_t)LCD_BACKLIGHT_GPIO, pwmVal);
@@ -391,7 +400,9 @@ static void lcdHardReset() {
 static void lcdEnsureInit() {
     Logger::info("Initialization started", "DisplayManager");
 
-    lcdBacklightOn();
+    // Turn the panel on at the saved brightness right away: a plain digitalWrite() here would leave it
+    // at full power for the whole init sequence and flash at boot.
+    DisplayManager::setBrightness(configManager.getLcdBrightness());
 
     uint8_t rotation = configManager.getLCDRotationSafe();
 

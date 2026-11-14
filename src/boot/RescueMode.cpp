@@ -283,6 +283,35 @@ auto RescueMode::drawDebugScreen() -> void {
     gfx->print(WiFi.softAPIP().toString());
 }
 
+/// Landing page for phones: join the rescue AP, open http://192.168.4.1 and use the buttons, no
+/// curl needed. Plain forms, so a stock mobile browser is enough.
+static const char RESCUE_PAGE[] PROGMEM = R"HTML(<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rescue</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;padding:1.5rem;background:#111;color:#eee}
+h1{font-size:1.2rem;color:#f66;margin:0 0 1rem}
+form{margin:0 0 .75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+input[type=submit]{padding:.6rem 1rem;font-size:1rem;border:0;border-radius:.4rem;background:#2d7;color:#000;font-weight:600}
+input[type=file]{font-size:.9rem;color:#eee}
+small{color:#999;display:block;margin-top:1rem}
+</style></head><body>
+<h1>Rescue mode</h1>
+<form method="post" action="/api/v1/rescue/reboot"><input type="submit" value="Reboot normally"></form>
+<form method="post" action="/api/v1/rescue/reset"><input type="submit" value="Reset boot counters"></form>
+<form method="post" action="/api/v1/rescue/ota" enctype="multipart/form-data">
+<input type="file" name="firmware" accept=".bin"><input type="submit" value="Flash firmware"></form>
+<small>Reboot normally clears the boot-loop counters and boots the normal firmware. Flashing here
+also clears them, so the new firmware does not come straight back into rescue mode.</small>
+</body></html>)HTML";
+
+/**
+ * @brief Serve the rescue landing page
+ */
+static void handleRescuePage() {
+    rescueWebserver->raw().send_P(HTTP_CODE_OK, "text/html", RESCUE_PAGE);
+}
+
 /**
  * @brief Set CORS headers for rescue API responses
  */
@@ -463,6 +492,9 @@ static void handleRescueOtaFinished() {
     rescueWebserver->raw().send(HTTP_CODE_OK, "application/json", json);
 
     if (!Update.hasError()) {
+        // Clear the boot-loop counters before restarting, otherwise the fresh firmware boots straight
+        // back into rescue mode and the flash looks like it did nothing.
+        RescueMode::markBootStable();
         delay(REBOOT_DELAY_MS);
         ESP.restart();  // NOLINT(readability-static-accessed-through-instance)
     }
@@ -500,6 +532,9 @@ static void handleRescueReset() {
  * @brief Register rescue API endpoints (no auth)
  */
 auto RescueMode::registerRescueApi() -> void {
+    // GET / — one-tap recovery page for a phone (no auth)
+    rescueWebserver->raw().on("/", HTTP_GET, handleRescuePage);
+
     // GET /api/v1/rescue/status — debug info (no auth)
     rescueWebserver->raw().on("/api/v1/rescue/status", HTTP_GET, handleRescueStatus);
 
